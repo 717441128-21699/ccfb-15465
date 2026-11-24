@@ -1,0 +1,18 @@
+{
+  "name": "touguangjing",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "西汉透光镜交互展示:冷却推算与反光成像的 WebGPU 模拟",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.51",
+    "puppeteer-core": "^23.9.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

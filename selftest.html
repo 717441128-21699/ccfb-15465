@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>WebGPU 自测</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+  const out = document.getElementById('out');
+  const log = (...a) => {
+    const line = a.join(' ');
+    out.textContent += '\n' + line;
+  };
+  try {
+    const [{ MirrorEngine, GRID }, { PatternEditor, drawPreset, readThickness, PATTERN_SIZE }] = await Promise.all([
+      import('/src/gpu/engine.ts'),
+      import('/src/pattern.ts'),
+    ]);
+    const canvas = document.createElement('canvas');
+    canvas.width = PATTERN_SIZE;
+    canvas.height = PATTERN_SIZE;
+
+    const engine = await MirrorEngine.create();
+    const d = engine.device;
+    const params = {
+      dWall: 2,
+      incidenceDeg: 0,
+      sourceAngularDiamDeg: 0.9,
+      baseCurve: 0.9,
+      grind: 0.5,
+      exposure: 1.0,
+    };
+
+    const results = [];
+    for (const id of ['lianhua', 'caoye', 'xingyun', 'panchi']) {
+      drawPreset(canvas, id);
+      engine.uploadPattern(readThickness(canvas));
+      const r = await engine.runCooling(params);
+      engine.runProjection(params);
+      results.push({ id, ...r });
+    }
+
+    // 研磨程度单调性
+    drawPreset(canvas, 'lianhua');
+    engine.uploadPattern(readThickness(canvas));
+    const low = await engine.runCooling({ ...params, grind: 0.05 });
+    const high = await engine.runCooling({ ...params, grind: 1 });
+
+    // 不同距离/光源下投影可正常生成
+    engine.runProjection({ ...params, dWall: 0.5 });
+    engine.runProjection({ ...params, dWall: 5 });
+
+    // 三种视图渲染
+    for (const mode of [0, 1, 2]) {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 256;
+      engine.render(c, mode, params);
+    }
+
+    const allInRange = results.every((r) => r.amplitudeUm >= 0.1 && r.amplitudeUm <= 1.0);
+    const fastEnough = results.every((r) => r.totalMs < 1000);
+    const monotonic = high.amplitudeUm >= low.amplitudeUm;
+    // 管线真的产出了非零厚度与高度场
+    const nonzero = results.every((r) => r.stats.stdMm > 0.05 && r.rmsNorm > 1e-3);
+
+    results.forEach((r) =>
+      log(
+        `[${r.id}] amp=${r.amplitudeUm.toFixed(4)}μm raw=${r.rawUm.toFixed(4)} pv=${r.pvUm.toFixed(3)}μm ` +
+        `stdMm=${r.stats.stdMm.toFixed(4)} rmsNorm=${r.rmsNorm.toFixed(5)} cooling=${r.totalMs.toFixed(0)}ms clamped=${r.clamped}`,
+      ),
+    );
+    log('grind monotonic: thin-grind amp=' + low.amplitudeUm.toFixed(3) + ' vs full-grind amp=' + high.amplitudeUm.toFixed(3));
+    log('projection at d=0.5m and d=5m: OK');
+    log('render modes 0/1/2: OK');
+
+    const checks = { allInRange, fastEnough, monotonic, nonzero };
+    Object.entries({
+      'amplitude 0.1-1μm': allInRange,
+      'cooling < 1s': fastEnough,
+      'grind monotonic': monotonic,
+      'nonzero fields': nonzero,
+    }).forEach(([name, pass]) => log(`PASS ${name}: ${pass}`));
+    const ok = Object.values(checks).every(Boolean);
+    log(ok ? 'ALL PASS' : 'FAIL');
+    window.__selftest = ok;
+  } catch (e) {
+    out.textContent += '\nERROR ' + (e?.stack || String(e));
+    window.__selftest = false;
+  }
+</script>
+</body>
+</html>

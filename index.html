@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>西汉透光镜 · 交互展示</title>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <h1>西汉透光镜</h1>
+        <p class="subtitle">阳光照镜面,墙上现镜背 —— 冷却收缩与微曲率反光的 WebGPU 模拟</p>
+      </div>
+      <div class="header-badges">
+        <span class="badge">计算着色器 · WGSL</span>
+        <span class="badge">镜面网格 512²</span>
+      </div>
+    </header>
+
+    <div id="webgpu-error" class="error-banner" hidden>
+      <strong>无法启动 WebGPU:</strong>
+      <p></p>
+      <span>请使用最新版 Chrome / Edge,并确认硬件加速已开启。</span>
+    </div>
+
+    <main class="layout">
+      <section class="stage">
+        <nav class="tabs">
+          <button class="tab-btn active" data-tab="pattern">① 镜背纹样</button>
+          <button class="tab-btn" data-tab="relief">② 镜面起伏</button>
+          <button class="tab-btn" data-tab="wall">③ 墙面投影</button>
+          <button class="tab-btn" data-tab="theory">④ 原理讲解</button>
+        </nav>
+
+        <!-- ① 镜背纹样 -->
+        <div class="tab-panel active" id="tab-pattern">
+          <div class="canvas-wrap">
+            <canvas id="pattern-canvas"></canvas>
+            <div class="canvas-hint">灰度即厚度:越亮的部位镜体越厚(0.8–2.2 mm)</div>
+          </div>
+          <div class="editor-controls">
+            <div class="preset-row" id="preset-buttons"></div>
+            <div class="tool-row">
+              <button class="tool-btn active" data-tool="raise">增厚(加纹)</button>
+              <button class="tool-btn" data-tool="lower">削薄(减纹)</button>
+              <button class="tool-btn" data-tool="erase">橡皮</button>
+              <button class="tool-btn ghost" id="btn-clear">清空</button>
+            </div>
+            <div class="slider-row">
+              <label>笔刷直径 <span id="ctl-brush-val"></span>
+                <input type="range" id="ctl-brush" min="6" max="60" value="18" />
+              </label>
+              <label>力度 <span id="ctl-strength-val"></span>
+                <input type="range" id="ctl-strength" min="10" max="100" value="50" />
+              </label>
+            </div>
+            <p class="tip">在镜背上改一笔,松手后 1 秒内自动重新推算冷却起伏与投影。</p>
+          </div>
+        </div>
+
+        <!-- ② 镜面起伏 -->
+        <div class="tab-panel" id="tab-relief">
+          <div class="dual-view">
+            <figure>
+              <figcaption>镜背厚度分布</figcaption>
+              <canvas id="thickness-canvas"></canvas>
+            </figure>
+            <figure>
+              <figcaption>镜面微起伏(视觉放大约 3 万倍,实际仅亚微米)</figcaption>
+              <canvas id="relief-canvas"></canvas>
+            </figure>
+          </div>
+          <div class="stat-grid">
+            <div class="stat"><span>起伏幅度 RMS</span><strong id="stat-amplitude">—</strong></div>
+            <div class="stat"><span>峰峰值估计</span><strong id="stat-pv">—</strong></div>
+            <div class="stat"><span>镜体厚度(均值±σ)</span><strong id="stat-thickness">—</strong></div>
+            <div class="stat"><span>归一化高度 σ</span><strong id="stat-rmsnorm">—</strong></div>
+          </div>
+          <p class="clamp-note" id="stat-clamp" hidden></p>
+        </div>
+
+        <!-- ③ 墙面投影 -->
+        <div class="tab-panel" id="tab-wall">
+          <div class="canvas-wrap wall-wrap">
+            <canvas id="wall-canvas"></canvas>
+            <div class="scale-bar-wrap">
+              <div class="scale-bar" id="scale-bar"></div>
+              <span id="scale-label"></span>
+            </div>
+            <div class="canvas-hint">凸处光散开变暗,凹处光聚拢变亮 —— 镜背花纹由此映出</div>
+          </div>
+          <div class="stat-grid">
+            <div class="stat"><span>冷却推算耗时</span><strong id="stat-time">—</strong></div>
+            <div class="stat"><span>合金收缩率 ε</span><strong id="stat-shrink">—</strong></div>
+            <div class="stat"><span>结构系数 K</span><strong id="stat-k">—</strong></div>
+            <div class="stat"><span>研磨系数 g</span><strong id="stat-grindfactor">—</strong></div>
+          </div>
+        </div>
+
+        <!-- ④ 原理讲解 -->
+        <div class="tab-panel" id="tab-theory">
+          <article class="theory">
+            <h2>为什么光滑镜面能「照出」背面的花纹?</h2>
+            <ol class="steps">
+              <li>
+                <h3>1. 厚薄不匀的镜背</h3>
+                <p>镜背有凸起的花纹和铭文,这些部位镜体更厚,平坦处更薄(本展按
+                  <strong id="stat-diameter">80 mm</strong> 径、0.8–2.2 mm 厚建模)。</p>
+              </li>
+              <li>
+                <h3>2. 凝固收缩产生应力</h3>
+                <p>浇铸冷却时,锡青铜整体线收缩率约 <strong id="theory-shrink">1.6%</strong>。
+                  厚处冷却慢、薄处冷却快,凝固不同步在镜体内留下残余应力。</p>
+              </li>
+              <li>
+                <h3>3. 弹性弯曲留下微曲率</h3>
+                <p>应力释放使镜面发生弹性挠曲。厚薄差 Δt 转化为镜面曲率扰动:
+                <div class="formula">∇²h = −α · (t − t̄)</div>
+                即高度场的二阶导(局部曲率)正比于厚度偏差。本展在 GPU 上用 48 次雅可比迭代求解该泊松方程。</p>
+              </li>
+              <li>
+                <h3>4. 研磨使起伏「显形」</h3>
+                <p>镜面反复研磨抛薄后,对残余变形的约束减弱,起伏被放大。幅度标定关系:
+                <div class="formula">h<sub>rms</sub> = K · ε · D² · σ<sub>t</sub> · g(研磨)</div>
+                K=<span id="theory-k">0.01</span> 为按文物检测报告反标的无量纲结构系数,
+                计算结果被约束在 <strong>0.1–1 μm</strong> 实测数量级内。肉眼完全不可见,手摸也是光滑的。</p>
+              </li>
+              <li>
+                <h3>5. 平行光把微斜率放大成光斑</h3>
+                <p>一束平行光(太阳)照到镜面,每根光线按反射定律偏转。起伏处的局部曲率改变反射方向:
+                  <strong>凹下区域曲率汇聚光线 → 墙上变亮;凸起区域曲率发散光线 → 墙上变暗</strong>。
+                  传播距离 L 把亚微米起伏的微小斜率放大成可分辨的位移 Δ ≈ 2L·(∂h/∂x)。</p>
+              </li>
+              <li>
+                <h3>6. 距离与光源大小的作用</h3>
+                <p>距离近,位移 Δ 小,花纹模糊;距离远,花纹清楚但整体光斑也被凸面镜发散拉大。
+                  光源角直径越大,每根光线在墙上的展宽 σ = θ·L 越大,对比越柔和。试调左侧滑块即可验证。</p>
+              </li>
+            </ol>
+            <p class="footnote">本模型为博物馆科普用途的唯象标定模型,应力场与弹性挠曲经泊松方程近似,
+              幅度以文物实测 0.1–1 μm 数量级为校准目标,不替代有限元定量分析。</p>
+          </article>
+        </div>
+      </section>
+
+      <aside class="controls">
+        <h2>实验参数</h2>
+        <div class="ctl">
+          <label>镜到墙距离 <output id="ctl-distance-val"></output></label>
+          <input type="range" id="ctl-distance" min="0.3" max="6" step="0.05" value="2" />
+          <div class="range-hints"><span>近 · 模糊</span><span>远 · 清晰但发散</span></div>
+        </div>
+        <div class="ctl">
+          <label>入射角度 <output id="ctl-angle-val"></output></label>
+          <input type="range" id="ctl-angle" min="0" max="45" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <label>光源角直径 <output id="ctl-source-val"></output></label>
+          <input type="range" id="ctl-source" min="0.05" max="3" step="0.05" value="0.9" />
+          <div class="range-hints"><span>点光源 · 锐利</span><span>大光源 · 柔和</span></div>
+        </div>
+        <div class="ctl">
+          <label>镜面基底凸度 <output id="ctl-curve-val"></output></label>
+          <input type="range" id="ctl-curve" min="0" max="2.5" step="0.05" value="0.9" />
+        </div>
+        <div class="ctl">
+          <label>研磨程度(镜面磨薄)<output id="ctl-grind-val"></output></label>
+          <input type="range" id="ctl-grind" min="0" max="1" step="0.05" value="0.5" />
+          <div class="range-hints"><span>厚 · 起伏弱</span><span>薄 · 起伏明显</span></div>
+        </div>
+        <div class="ctl">
+          <label>显示曝光 <output id="ctl-exposure-val"></output></label>
+          <input type="range" id="ctl-exposure" min="0.3" max="3" step="0.05" value="1" />
+        </div>
+        <button id="btn-reset" class="reset-btn">恢复默认参数</button>
+
+        <div class="pipeline-note">
+          <h3>计算管线</h3>
+          <p>厚度场 → 盒式平滑(应力扩散)→ 雅可比泊松求解 48 次 → RMS 归约标定 → 微曲率反光成像</p>
+          <p>网格:<strong id="stat-grid">512×512</strong> · 改光学参数只重算投影,改纹样才重算冷却</p>
+        </div>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
